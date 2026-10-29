@@ -32,8 +32,21 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// API Routes
+// Root welcome route for quick health inspection in browser
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    message: 'Appointment Manager API is live and operational.',
+    endpoints: {
+      health: '/api/health',
+      appointments: '/api/appointments',
+    },
+  });
+});
+
+// Support both /api prefix and root routes (handles Vercel serverless routing edge cases)
 app.use('/api', appointmentRoutes);
+app.use('/', appointmentRoutes);
 
 // Fallback for unhandled routes
 app.use((req, res) => {

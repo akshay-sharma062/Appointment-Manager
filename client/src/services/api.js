@@ -1,4 +1,33 @@
-const BASE_URL = import.meta.env.VITE_API_URL || '/api';
+// Normalize Base URL: remove trailing slashes
+const rawUrl = import.meta.env.VITE_API_URL || '/api';
+const BASE_URL = rawUrl.replace(/\/+$/, '');
+
+/**
+ * Safe JSON parser that catches HTML error pages (e.g. Vercel 404 / 500 HTML)
+ * and returns clear, understandable errors instead of "Unexpected token '<'".
+ */
+async function parseSafeJson(res) {
+  const text = await res.text();
+
+  if (!text) {
+    return {};
+  }
+
+  // Check if server returned HTML instead of JSON
+  if (text.trim().startsWith('<') || text.includes('<!DOCTYPE')) {
+    const statusInfo = res.status ? ` (HTTP ${res.status})` : '';
+    throw new Error(
+      `Backend returned an HTML page instead of JSON${statusInfo}. ` +
+      `Check that VITE_API_URL points to your backend Vercel URL (e.g. https://your-backend.vercel.app/api).`
+    );
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error(`Failed to parse server response as JSON: ${text.slice(0, 120)}`);
+  }
+}
 
 /**
  * Fetch appointments with optional status and customer-name search filters
@@ -16,11 +45,12 @@ export async function getAppointments({ status = 'All', search = '' } = {}) {
   const url = `${BASE_URL}/appointments${queryString ? `?${queryString}` : ''}`;
 
   const res = await fetch(url);
+  const data = await parseSafeJson(res);
+
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.message || `Failed to fetch appointments (${res.status})`);
+    throw new Error(data.message || `Failed to fetch appointments (${res.status})`);
   }
-  const data = await res.json();
+
   return data.data || [];
 }
 
@@ -36,7 +66,7 @@ export async function createAppointment(appointmentData) {
     body: JSON.stringify(appointmentData),
   });
 
-  const data = await res.json().catch(() => ({}));
+  const data = await parseSafeJson(res);
 
   if (!res.ok) {
     const error = new Error(data.message || 'Failed to create appointment');
@@ -60,7 +90,7 @@ export async function updateAppointmentStatus(id, newStatus) {
     body: JSON.stringify({ status: newStatus }),
   });
 
-  const data = await res.json().catch(() => ({}));
+  const data = await parseSafeJson(res);
 
   if (!res.ok) {
     const error = new Error(data.message || 'Failed to update appointment status');
@@ -78,9 +108,9 @@ export async function checkBackendHealth() {
   try {
     const res = await fetch(`${BASE_URL}/health`);
     if (!res.ok) {
-      return { ok: false, message: `Server error: ${res.status}` };
+      return { ok: false, message: `Server returned status ${res.status}` };
     }
-    const data = await res.json();
+    const data = await parseSafeJson(res);
     return {
       ok: true,
       database: data.database,
@@ -90,4 +120,3 @@ export async function checkBackendHealth() {
     return { ok: false, message: err.message };
   }
 }
-
