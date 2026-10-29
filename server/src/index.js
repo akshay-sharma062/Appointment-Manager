@@ -26,5 +26,9 @@ async function startServer() {
   });
 }
 
-startServer();
+// In local execution start the server; in serverless (e.g. Vercel) export the Express handler
+if (!process.env.VERCEL) {
+  startServer();
+}
 
+module.exports = app;

@@ -1,9 +1,19 @@
 const mongoose = require('mongoose');
 const Appointment = require('../models/Appointment');
 const { getDbStatus } = require('../config/db');
+const { SAMPLE_APPOINTMENTS } = require('../utils/seed');
 
 // Valid status values
 const VALID_STATUSES = ['Pending', 'Confirmed', 'Cancelled'];
+
+// In-memory store for fallback mode when database is not yet connected
+let fallbackStore = SAMPLE_APPOINTMENTS.map((item, idx) => ({
+  ...item,
+  id: `sample-${idx + 1}`,
+  _id: `sample-${idx + 1}`,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+}));
 
 /**
  * GET /api/appointments
@@ -23,9 +33,32 @@ async function getAppointments(req, res, next) {
     }
 
     if (search && typeof search === 'string' && search.trim() !== '') {
-      // Escape regex special characters to prevent regex injection
       const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.customerName = { $regex: escaped, $options: 'i' };
+    }
+
+    // Check if MongoDB is connected
+    const isDbConnected = mongoose.connection.readyState === 1;
+
+    if (!isDbConnected) {
+      // In-memory fallback if MongoDB connection is pending or not configured
+      let list = [...fallbackStore];
+
+      if (filter.status) {
+        list = list.filter((a) => a.status === filter.status);
+      }
+      if (search && search.trim()) {
+        const query = search.trim().toLowerCase();
+        list = list.filter((a) => a.customerName.toLowerCase().includes(query));
+      }
+
+      return res.status(200).json({
+        success: true,
+        count: list.length,
+        data: list,
+        persisted: false,
+        notice: 'MongoDB is disconnected. Displaying demo fallback data.',
+      });
     }
 
     const appointments = await Appointment.find(filter).sort({ dateTime: 1 });
@@ -33,6 +66,7 @@ async function getAppointments(req, res, next) {
       success: true,
       count: appointments.length,
       data: appointments,
+      persisted: true,
     });
   } catch (err) {
     return next(err);
@@ -82,6 +116,29 @@ async function createAppointment(req, res, next) {
       });
     }
 
+    const isDbConnected = mongoose.connection.readyState === 1;
+
+    if (!isDbConnected) {
+      const fallbackItem = {
+        id: `local-${Date.now()}`,
+        _id: `local-${Date.now()}`,
+        customerName: customerName.trim(),
+        service: service.trim(),
+        dateTime: new Date(dateTime),
+        status: appointmentStatus,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      fallbackStore.unshift(fallbackItem);
+
+      return res.status(201).json({
+        success: true,
+        message: 'Appointment created in demo fallback mode (MongoDB not connected)',
+        data: fallbackItem,
+        persisted: false,
+      });
+    }
+
     const newAppointment = new Appointment({
       customerName: customerName.trim(),
       service: service.trim(),
@@ -95,6 +152,7 @@ async function createAppointment(req, res, next) {
       success: true,
       message: 'Appointment created successfully',
       data: saved,
+      persisted: true,
     });
   } catch (err) {
     if (err.name === 'ValidationError') {
@@ -121,13 +179,6 @@ async function updateAppointmentStatus(req, res, next) {
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid appointment ID format',
-      });
-    }
-
     if (!status || typeof status !== 'string' || !VALID_STATUSES.includes(status.trim())) {
       return res.status(400).json({
         success: false,
@@ -135,6 +186,34 @@ async function updateAppointmentStatus(req, res, next) {
         errors: {
           status: `Valid values are: ${VALID_STATUSES.join(', ')}`,
         },
+      });
+    }
+
+    const isDbConnected = mongoose.connection.readyState === 1;
+
+    if (!isDbConnected) {
+      const found = fallbackStore.find((item) => item.id === id);
+      if (!found) {
+        return res.status(404).json({
+          success: false,
+          message: `Appointment with ID ${id} not found`,
+        });
+      }
+      found.status = status.trim();
+      found.updatedAt = new Date().toISOString();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Status updated in demo fallback mode',
+        data: found,
+        persisted: false,
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid appointment ID format',
       });
     }
 
@@ -155,6 +234,7 @@ async function updateAppointmentStatus(req, res, next) {
       success: true,
       message: 'Status updated successfully',
       data: updated,
+      persisted: true,
     });
   } catch (err) {
     return next(err);
@@ -180,4 +260,3 @@ module.exports = {
   updateAppointmentStatus,
   getHealth,
 };
-
