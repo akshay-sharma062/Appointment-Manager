@@ -2,8 +2,12 @@ const express = require('express');
 const cors = require('cors');
 const appointmentRoutes = require('./routes/appointmentRoutes');
 const errorHandler = require('./middleware/errorHandler');
+const { connectDB } = require('./config/db');
+const { seedInitialDataIfEmpty } = require('./utils/seed');
 
 const app = express();
+
+let isSeeded = false;
 
 // Middlewares
 app.use(cors({
@@ -12,6 +16,21 @@ app.use(cors({
   allowedHeaders: ['Content-Type'],
 }));
 app.use(express.json());
+
+// Serverless database connection middleware (ensures connection on Vercel)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    if (!isSeeded) {
+      await seedInitialDataIfEmpty();
+      isSeeded = true;
+    }
+  } catch (err) {
+    // If DB is offline, continue so /api/health can report status without crashing
+    console.error('[DB Middleware]:', err.message);
+  }
+  next();
+});
 
 // API Routes
 app.use('/api', appointmentRoutes);
@@ -28,4 +47,3 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 module.exports = app;
-
