@@ -1,6 +1,27 @@
-// Normalize Base URL: remove trailing slashes
-const rawUrl = import.meta.env.VITE_API_URL || '/api';
-const BASE_URL = rawUrl.replace(/\/+$/, '');
+// Determine the API base URL with production-ready fallback
+const DEPLOYED_BACKEND_URL = 'https://appointmentmanager-three.vercel.app/api';
+
+function resolveBaseUrl() {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && envUrl.trim() && !envUrl.includes('undefined')) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  // When deployed on Vercel or any non-localhost host, use the live backend API
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname &&
+    !window.location.hostname.includes('localhost') &&
+    !window.location.hostname.includes('127.0.0.1')
+  ) {
+    return DEPLOYED_BACKEND_URL;
+  }
+
+  // Local development default (proxied by Vite dev server to localhost:5000)
+  return '/api';
+}
+
+const BASE_URL = resolveBaseUrl();
 
 /**
  * Safe JSON parser that catches HTML error pages (e.g. Vercel 404 / 500 HTML)
@@ -18,7 +39,7 @@ async function parseSafeJson(res) {
     const statusInfo = res.status ? ` (HTTP ${res.status})` : '';
     throw new Error(
       `Backend returned an HTML page instead of JSON${statusInfo}. ` +
-      `Check that VITE_API_URL points to your backend Vercel URL (e.g. https://your-backend.vercel.app/api).`
+      `Check that VITE_API_URL points to your backend Vercel URL (e.g. https://appointmentmanager-three.vercel.app/api).`
     );
   }
 
